@@ -9,6 +9,10 @@ use WP_Custom_API\Includes\Endpoint_Manager\Endpoint_Manager;
 use WP_Custom_API\Includes\Endpoint_Manager\Webhook_Handler;
 use WP_Custom_API\Includes\Endpoint_Manager\ETL_Engine;
 use WP_Custom_API\Includes\Endpoint_Manager\External_Service_Connector;
+use WP_Custom_API\Includes\Endpoint_Manager\System_Manager;
+use WP_Custom_API\Includes\Endpoint_Manager\Configuration_Manager;
+use WP_Custom_API\Includes\Endpoint_Manager\Event_Logger;
+use WP_Custom_API\Includes\Endpoint_Manager\Scheduler;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -27,6 +31,10 @@ if (!defined('ABSPATH')) exit;
  * - ETL Templates
  * - ETL Jobs
  * - External Services
+ * - System Dashboard
+ * - Configuration
+ * - Event Logs
+ * - Scheduled Tasks
  *
  * @since 1.1.0
  */
@@ -386,6 +394,371 @@ final class Controller extends Controller_Interface
         $result = $connector->send($id, $path, $data, $method);
 
         return new WP_REST_Response($result, $result['code'] ?? 200);
+    }
+
+    // ==================== SYSTEM DASHBOARD ====================
+
+    /**
+     * Get system status overview
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_system_status(WP_REST_Request $request): WP_REST_Response
+    {
+        $system = System_Manager::instance();
+        return new WP_REST_Response([
+            'status' => $system->get_status(),
+            'statistics' => $system->get_statistics()
+        ], 200);
+    }
+
+    /**
+     * Get system health check
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_system_health(WP_REST_Request $request): WP_REST_Response
+    {
+        $system = System_Manager::instance();
+        $health = $system->health_check();
+        $status_code = $health['healthy'] ? 200 : 503;
+        return new WP_REST_Response($health, $status_code);
+    }
+
+    /**
+     * Get system statistics
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_system_statistics(WP_REST_Request $request): WP_REST_Response
+    {
+        $system = System_Manager::instance();
+        return new WP_REST_Response($system->get_statistics(), 200);
+    }
+
+    /**
+     * Enable maintenance mode
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function enable_maintenance(WP_REST_Request $request): WP_REST_Response
+    {
+        $reason = self::get_request_body($request)['reason'] ?? '';
+        $system = System_Manager::instance();
+        $system->enable_maintenance_mode($reason);
+        return new WP_REST_Response([
+            'message' => 'Maintenance mode enabled',
+            'reason' => $reason
+        ], 200);
+    }
+
+    /**
+     * Disable maintenance mode
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function disable_maintenance(WP_REST_Request $request): WP_REST_Response
+    {
+        $system = System_Manager::instance();
+        $system->disable_maintenance_mode();
+        return new WP_REST_Response([
+            'message' => 'Maintenance mode disabled'
+        ], 200);
+    }
+
+    // ==================== CONFIGURATION ====================
+
+    /**
+     * Get all configuration settings
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_configuration(WP_REST_Request $request): WP_REST_Response
+    {
+        $grouped = $request->get_param('grouped') === 'true';
+
+        if ($grouped) {
+            return new WP_REST_Response(Configuration_Manager::get_grouped(), 200);
+        }
+
+        return new WP_REST_Response(Configuration_Manager::get_all(), 200);
+    }
+
+    /**
+     * Get a specific configuration setting
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_config_setting(WP_REST_Request $request): WP_REST_Response
+    {
+        $key = $request->get_param('key');
+        $value = Configuration_Manager::get($key);
+
+        if ($value === null) {
+            return new WP_REST_Response(['message' => 'Setting not found'], 404);
+        }
+
+        return new WP_REST_Response([
+            'key' => $key,
+            'value' => $value,
+            'default' => Configuration_Manager::get_default($key)
+        ], 200);
+    }
+
+    /**
+     * Update configuration settings
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function update_configuration(WP_REST_Request $request): WP_REST_Response
+    {
+        $settings = self::get_request_body($request);
+
+        if (empty($settings)) {
+            return new WP_REST_Response(['message' => 'No settings provided'], 400);
+        }
+
+        $success = Configuration_Manager::set_many($settings);
+
+        return new WP_REST_Response([
+            'message' => $success ? 'Settings updated' : 'Failed to update settings',
+            'settings' => $settings
+        ], $success ? 200 : 500);
+    }
+
+    /**
+     * Reset configuration to defaults
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function reset_configuration(WP_REST_Request $request): WP_REST_Response
+    {
+        $keys = self::get_request_body($request)['keys'] ?? null;
+        $success = Configuration_Manager::reset($keys);
+
+        return new WP_REST_Response([
+            'message' => $success ? 'Settings reset to defaults' : 'Failed to reset settings'
+        ], $success ? 200 : 500);
+    }
+
+    /**
+     * Export configuration
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function export_configuration(WP_REST_Request $request): WP_REST_Response
+    {
+        $export = Configuration_Manager::export();
+        return new WP_REST_Response([
+            'config' => json_decode($export, true),
+            'exported_at' => time()
+        ], 200);
+    }
+
+    /**
+     * Import configuration
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function import_configuration(WP_REST_Request $request): WP_REST_Response
+    {
+        $body = self::get_request_body($request);
+        $config = $body['config'] ?? $body;
+        $merge = $body['merge'] ?? true;
+
+        $json = is_array($config) ? json_encode($config) : $config;
+        $success = Configuration_Manager::import($json, $merge);
+
+        return new WP_REST_Response([
+            'message' => $success ? 'Configuration imported' : 'Failed to import configuration'
+        ], $success ? 200 : 500);
+    }
+
+    // ==================== EVENT LOGS ====================
+
+    /**
+     * Get event logs
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_event_logs(WP_REST_Request $request): WP_REST_Response
+    {
+        $filters = [
+            'category' => $request->get_param('category'),
+            'level' => $request->get_param('level'),
+            'min_level' => $request->get_param('min_level'),
+            'from' => $request->get_param('from'),
+            'to' => $request->get_param('to'),
+            'user_id' => $request->get_param('user_id'),
+            'search' => $request->get_param('search'),
+            'page' => $request->get_param('page'),
+            'per_page' => $request->get_param('per_page'),
+        ];
+
+        // Remove null filters
+        $filters = array_filter($filters, fn($v) => $v !== null);
+
+        $result = Event_Logger::get_events($filters);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Get event log statistics
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_event_statistics(WP_REST_Request $request): WP_REST_Response
+    {
+        $period = $request->get_param('period') ?? 'today';
+        $stats = Event_Logger::get_statistics($period);
+        return new WP_REST_Response($stats, 200);
+    }
+
+    /**
+     * Export event logs
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function export_event_logs(WP_REST_Request $request): WP_REST_Response
+    {
+        $filters = self::get_request_body($request);
+        $format = $request->get_param('format') ?? 'json';
+
+        $result = Event_Logger::export($filters, $format);
+        return new WP_REST_Response($result, 200);
+    }
+
+    /**
+     * Cleanup event logs
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function cleanup_event_logs(WP_REST_Request $request): WP_REST_Response
+    {
+        $days = (int) ($request->get_param('days') ?? 90);
+        $result = Event_Logger::cleanup($days);
+        return self::response($result, $result->status_code);
+    }
+
+    // ==================== SCHEDULED TASKS ====================
+
+    /**
+     * List all scheduled tasks
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function list_scheduled_tasks(WP_REST_Request $request): WP_REST_Response
+    {
+        $result = Scheduler::get_all_tasks();
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Get a specific scheduled task
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function get_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $id = (int) $request->get_param('id');
+        $result = Scheduler::get_task($id);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Create a scheduled task
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function create_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $data = self::get_request_body($request);
+        $result = Scheduler::create_task($data);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Update a scheduled task
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function update_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $id = (int) $request->get_param('id');
+        $data = self::get_request_body($request);
+        $result = Scheduler::update_task($id, $data);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Delete a scheduled task
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function delete_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $id = (int) $request->get_param('id');
+        $result = Scheduler::delete_task($id);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Pause a scheduled task
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function pause_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $id = (int) $request->get_param('id');
+        $result = Scheduler::pause_task($id);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Resume a scheduled task
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function resume_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $id = (int) $request->get_param('id');
+        $result = Scheduler::resume_task($id);
+        return self::response($result, $result->status_code);
+    }
+
+    /**
+     * Run a scheduled task immediately
+     *
+     * @param WP_REST_Request $request
+     * @return WP_REST_Response
+     */
+    public static function run_scheduled_task(WP_REST_Request $request): WP_REST_Response
+    {
+        $id = (int) $request->get_param('id');
+        $result = Scheduler::run_now($id);
+        return new WP_REST_Response($result, $result['success'] ? 200 : 500);
     }
 
     // ==================== HELPERS ====================

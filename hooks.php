@@ -2,8 +2,12 @@
 
 namespace WP_Custom_API;
 
+use WP_Custom_API\Includes\Endpoint_Manager\System_Manager;
 use WP_Custom_API\Includes\Endpoint_Manager\Endpoint_Manager;
 use WP_Custom_API\Includes\Endpoint_Manager\Action_Executor;
+use WP_Custom_API\Includes\Endpoint_Manager\Configuration_Manager;
+use WP_Custom_API\Includes\Endpoint_Manager\Event_Logger;
+use WP_Custom_API\Includes\Endpoint_Manager\Scheduler;
 
 /**
  * Prevent direct access from sources other than the Wordpress environment
@@ -21,6 +25,13 @@ if (!defined('ABSPATH')) exit;
  * - ETL (Extract, Transform, Load) processing
  * - External service connections
  * - Custom action/hook execution
+ * - System management and monitoring
+ * - Event logging and audit trail
+ * - Scheduled task execution
+ * - Configuration management
+ *
+ * @since 1.0.0
+ * @since 1.1.0 Added System Manager integration
  */
 
 final class Hooks
@@ -49,8 +60,9 @@ final class Hooks
 
     public static function after_init(): void
     {
-        // Initialize the Endpoint Manager to register dynamic endpoints
-        Endpoint_Manager::init();
+        // Initialize the System Manager which orchestrates all components
+        // This will initialize: Configuration, Event Logger, Scheduler, Endpoint Manager
+        System_Manager::instance()->init();
 
         // Allow users to add custom initialization code
         do_action('wp_custom_api_after_endpoint_manager_init');
