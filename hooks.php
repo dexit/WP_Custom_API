@@ -94,4 +94,26 @@ final class Hooks
     {
         Endpoint_Manager::register_callback($name, $callback);
     }
+
+    /**
+     * Initialize Endpoint Manager only (without requiring full plugin initialization)
+     * This is called on plugins_loaded to ensure dynamic endpoints are always available
+     *
+     * @return void
+     */
+    public static function init_endpoint_manager_only(): void
+    {
+        // Register built-in action handlers
+        Action_Executor::register_builtin_handlers();
+
+        // Allow users to register custom action handlers
+        do_action('wp_custom_api_register_handlers');
+
+        // Initialize the System Manager which orchestrates all Endpoint Manager components
+        // This will initialize: Configuration, Event Logger, Scheduler, Endpoint Manager
+        System_Manager::instance()->init();
+
+        // Allow users to add custom initialization code
+        do_action('wp_custom_api_after_endpoint_manager_init');
+    }
 }

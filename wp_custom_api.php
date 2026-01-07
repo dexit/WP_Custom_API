@@ -61,7 +61,55 @@ if (!version_compare(PHP_VERSION, '8.1.0', '>=')) {
     Init::run();
 }
 
-/** 
+/**
+ * Register plugin activation hook to set up Endpoint Manager on activation
+ */
+
+register_activation_hook(__FILE__, function() {
+    if (version_compare(PHP_VERSION, '8.1.0', '>=')) {
+        // Load necessary classes for activation
+        require_once WP_CUSTOM_API_FOLDER_PATH . 'includes/database.php';
+        require_once WP_CUSTOM_API_FOLDER_PATH . 'includes/response_handler.php';
+
+        // Load all Endpoint Manager model classes to ensure tables can be created
+        $endpoint_manager_models = [
+            'custom_endpoint_model.php',
+            'webhook_log_model.php',
+            'etl_template_model.php',
+            'etl_job_model.php',
+            'external_service_model.php',
+            'system_settings_model.php',
+            'event_log_model.php',
+            'scheduled_task_model.php'
+        ];
+
+        foreach ($endpoint_manager_models as $model_file) {
+            $path = WP_CUSTOM_API_FOLDER_PATH . 'includes/endpoint_manager/' . $model_file;
+            if (file_exists($path)) {
+                require_once $path;
+            }
+        }
+
+        // Create all Endpoint Manager tables
+        Init::create_endpoint_manager_tables();
+
+        // Log activation
+        error_log('WP Custom API: Plugin activated, Endpoint Manager tables created');
+    }
+});
+
+/**
+ * Initialize Endpoint Manager on all WordPress loads
+ * This ensures the Endpoint Manager is always available, not just during API requests
+ */
+
+add_action('plugins_loaded', function() {
+    if (version_compare(PHP_VERSION, '8.1.0', '>=')) {
+        Init::init_endpoint_manager();
+    }
+}, 5);
+
+/**
  * Output error messages that occurred when running the plugin.
  */
 

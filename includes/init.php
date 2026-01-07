@@ -100,7 +100,7 @@ final class Init
 
     /**
      * Runs the plugin by autoloading classes and files, creating tables in the database, and registering routes with the Wordpress REST API.
-     * 
+     *
      * @return void
      */
     public static function run(): void
@@ -113,6 +113,63 @@ final class Init
             new self();
             self::$instantiated = true;
             do_action('wp_custom_api_loaded', self::$files_loaded);
+        }
+    }
+
+    /**
+     * Initialize Endpoint Manager system on all WordPress loads
+     * This ensures dynamic endpoints are always registered with WordPress REST API
+     *
+     * @return void
+     */
+    public static function init_endpoint_manager(): void
+    {
+        // Register namespace autoloader if not already registered
+        spl_autoload_register([self::class, 'namespaces_autoloader_callback']);
+
+        // Initialize the Endpoint Manager system
+        // This will register dynamic endpoints on rest_api_init hook
+        \WP_Custom_API\Hooks::init_endpoint_manager_only();
+    }
+
+    /**
+     * Create Endpoint Manager database tables on plugin activation
+     *
+     * @return void
+     */
+    public static function create_endpoint_manager_tables(): void
+    {
+        // Array of model classes and their table names
+        $models = [
+            'WP_Custom_API\Includes\Endpoint_Manager\Custom_Endpoint_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\Webhook_Log_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\ETL_Template_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\ETL_Job_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\External_Service_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\System_Settings_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\Event_Log_Model',
+            'WP_Custom_API\Includes\Endpoint_Manager\Scheduled_Task_Model',
+        ];
+
+        foreach ($models as $model_class) {
+            if (class_exists($model_class)) {
+                $table_name = $model_class::TABLE_NAME;
+                $schema = $model_class::schema();
+
+                if (!Database::table_exists($table_name)) {
+                    $result = Database::create_table($table_name, $schema);
+
+                    if ($result->ok) {
+                        error_log("WP Custom API: Created table {$table_name}");
+                    } else {
+                        error_log("WP Custom API: Failed to create table {$table_name}");
+                        Error_Generator::generate(
+                            'Error creating Endpoint Manager table',
+                            "Failed to create table: {$table_name}"
+                        );
+                    }
+                }
+            }
         }
     }
 
