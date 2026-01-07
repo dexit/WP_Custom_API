@@ -120,6 +120,14 @@ add_action('plugins_loaded', function() {
 }, 5);
 
 /**
+ * Load Admin Menu system
+ */
+
+if (is_admin()) {
+    require_once WP_CUSTOM_API_FOLDER_PATH . 'includes/admin/admin-menu.php';
+}
+
+/**
  * Output error messages that occurred when running the plugin.
  */
 
