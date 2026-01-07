@@ -34,7 +34,17 @@ define("WP_CUSTOM_API_FOLDER_PATH",
     )
 );
 
-/** 
+/**
+ * Load Vendor dependencies (Composer packages)
+ */
+
+require_once WP_CUSTOM_API_FOLDER_PATH . 'includes/vendor-loader.php';
+
+use WP_Custom_API\Includes\Vendor_Loader;
+
+Vendor_Loader::init();
+
+/**
  * Load Error Generator to output errors that occur from the plugin
  */
 
@@ -42,7 +52,7 @@ require_once WP_CUSTOM_API_FOLDER_PATH . 'includes/error_generator.php';
 
 use WP_Custom_API\Includes\Error_Generator;
 
-/** 
+/**
  * Load Init class to initialize plugin.
  */
 

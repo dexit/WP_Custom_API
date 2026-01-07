@@ -1,0 +1,45 @@
+# Composer
+/vendor/
+composer.lock
+
+# Node modules (for React components)
+/node_modules/
+package-lock.json
+/assets/js/build/
+/assets/css/build/
+
+# IDE
+/.idea/
+/.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WordPress
+wp-config-local.php
+
+# Testing
+/tests/coverage/
+/.phpunit.result.cache
+
+# Build files
+/dist/
+/build/
+
+# Logs
+*.log
+/logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
