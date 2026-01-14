@@ -580,3 +580,188 @@
     margin: 20px 0;
     border-radius: 4px;
 }
+
+/* ==========================================================================
+   Test Modal
+   ========================================================================== */
+
+.wp-custom-api-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 100000;
+}
+
+.wp-custom-api-modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+.wp-custom-api-modal-dialog {
+    position: relative;
+    width: 90%;
+    max-width: 900px;
+    margin: 30px auto;
+    background: #fff;
+    border-radius: 4px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+    max-height: calc(100vh - 60px);
+    display: flex;
+    flex-direction: column;
+}
+
+.wp-custom-api-modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #dcdcde;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.wp-custom-api-modal-header h2 {
+    margin: 0;
+    font-size: 20px;
+}
+
+.wp-custom-api-modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    color: #646970;
+}
+
+.wp-custom-api-modal-close:hover {
+    color: #1d2327;
+}
+
+.wp-custom-api-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+/* Test Request Builder */
+.test-request-builder .form-group {
+    margin-bottom: 20px;
+}
+
+.test-request-builder label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.header-row,
+.param-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.header-row input,
+.param-row input {
+    width: 100%;
+}
+
+.header-row button,
+.param-row button {
+    white-space: nowrap;
+}
+
+/* Test Results */
+.test-response-meta {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 15px;
+    background: #f6f7f7;
+    border-radius: 4px;
+}
+
+.test-tabs {
+    display: flex;
+    gap: 5px;
+    border-bottom: 1px solid #c3c4c7;
+    margin-bottom: 15px;
+}
+
+.test-tab {
+    background: none;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.test-tab:hover {
+    background: #f6f7f7;
+}
+
+.test-tab.active {
+    border-bottom-color: #2271b1;
+    color: #2271b1;
+    font-weight: 600;
+}
+
+.test-tab-panel {
+    display: none;
+}
+
+.test-tab-panel.active {
+    display: block;
+}
+
+.test-tab-panel pre {
+    background: #1d2327;
+    color: #f0f0f1;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.test-tab-panel pre code {
+    color: #f0f0f1;
+}
+
+#copy-curl {
+    margin-top: 10px;
+}
+
+@media (max-width: 782px) {
+    .wp-custom-api-modal-dialog {
+        width: 95%;
+        margin: 20px auto;
+    }
+
+    .header-row,
+    .param-row {
+        grid-template-columns: 1fr;
+    }
+
+    .test-response-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+}

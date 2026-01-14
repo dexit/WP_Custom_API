@@ -49,6 +49,9 @@ final class Admin_Menu
     {
         add_action('admin_menu', [self::class, 'register_menu']);
         add_action('admin_enqueue_scripts', [self::class, 'enqueue_assets']);
+
+        // Load AJAX handlers
+        require_once WP_CUSTOM_API_FOLDER_PATH . 'includes/admin/class-ajax-handlers.php';
     }
 
     /**
@@ -252,6 +255,16 @@ final class Admin_Menu
 
         // Endpoint Editor - Monaco Editor
         if (strpos($hook, 'endpoint') !== false) {
+            // Endpoint Tester - Test modal interface
+            wp_enqueue_script(
+                'wp-custom-api-endpoint-tester',
+                $plugin_url . '/assets/js/endpoint-tester.js',
+                ['wp-custom-api-admin'],
+                $version,
+                true
+            );
+
+            // Endpoint Builder - Code editor
             wp_enqueue_script(
                 'wp-custom-api-endpoint-builder',
                 $plugin_url . '/assets/js/endpoint-builder.js',

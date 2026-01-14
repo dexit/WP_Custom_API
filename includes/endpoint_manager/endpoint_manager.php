@@ -74,6 +74,9 @@ final class Endpoint_Manager
         // Register dynamic endpoints
         add_action('rest_api_init', [self::class, 'register_dynamic_endpoints']);
 
+        // Register async endpoint processor
+        add_action('wp_custom_api_process_async_endpoint', [self::class, 'process_async_endpoint'], 10, 1);
+
         // Register hooks for custom endpoint actions
         do_action('wp_custom_api_endpoint_manager_init');
     }
@@ -241,6 +244,7 @@ final class Endpoint_Manager
     {
         $handler_type = $endpoint['handler_type'] ?? self::HANDLER_WEBHOOK;
         $handler_config = self::decode_json($endpoint['handler_config'] ?? '{}');
+        $endpoint_id = $endpoint['id'] ?? 0;
 
         // Allow pre-processing
         $pre_result = apply_filters(
@@ -254,6 +258,32 @@ final class Endpoint_Manager
             return $pre_result;
         }
 
+        // 1. CHECK RATE LIMITING
+        $rate_limit_check = self::check_rate_limit($endpoint_id, $endpoint);
+        if (!$rate_limit_check['allowed']) {
+            return new WP_REST_Response([
+                'message' => 'Rate limit exceeded. Please try again later.',
+                'retry_after' => $rate_limit_check['retry_after'] ?? 60
+            ], 429);
+        }
+
+        // 2. CHECK RESPONSE CACHE
+        if (!empty($endpoint['cache_ttl']) && (int)$endpoint['cache_ttl'] > 0) {
+            $cached_response = self::get_cached_response($request, $endpoint);
+            if ($cached_response !== null) {
+                return new WP_REST_Response($cached_response, 200, [
+                    'X-Cache' => 'HIT',
+                    'X-Cache-TTL' => $endpoint['cache_ttl']
+                ]);
+            }
+        }
+
+        // 3. CHECK IF ASYNC QUEUE ENABLED
+        if (!empty($endpoint['queue_async']) && (int)$endpoint['queue_async'] === 1) {
+            return self::dispatch_to_queue($request, $endpoint, $handler_type, $handler_config);
+        }
+
+        // 4. PROCESS REQUEST NORMALLY
         try {
             $response = match ($handler_type) {
                 self::HANDLER_WEBHOOK => self::handle_webhook($request, $endpoint, $handler_config),
@@ -268,6 +298,13 @@ final class Endpoint_Manager
             $response = new WP_REST_Response([
                 'message' => Config::DEBUG_MESSAGE_MODE ? $e->getMessage() : 'An error occurred processing the request'
             ], 500);
+        }
+
+        // 5. CACHE THE RESPONSE (if caching enabled and successful)
+        if (!empty($endpoint['cache_ttl']) && (int)$endpoint['cache_ttl'] > 0) {
+            if ($response->get_status() >= 200 && $response->get_status() < 300) {
+                self::cache_response($request, $endpoint, $response->get_data());
+            }
         }
 
         // Allow post-processing
@@ -395,6 +432,229 @@ final class Endpoint_Manager
 
         $etl_engine = new ETL_Engine();
         return $etl_engine->process($request, $template_id, $endpoint);
+    }
+
+    /**
+     * Check rate limiting for endpoint
+     *
+     * @param int $endpoint_id
+     * @param array $endpoint
+     * @return array ['allowed' => bool, 'retry_after' => int]
+     */
+    private static function check_rate_limit(int $endpoint_id, array $endpoint): array
+    {
+        $per_minute = (int)($endpoint['rate_limit_per_minute'] ?? 0);
+        $per_hour = (int)($endpoint['rate_limit_per_hour'] ?? 0);
+
+        // No rate limiting configured
+        if ($per_minute === 0 && $per_hour === 0) {
+            return ['allowed' => true];
+        }
+
+        $client_ip = self::get_client_ip();
+        $current_time = time();
+
+        // Check per-minute limit
+        if ($per_minute > 0) {
+            $transient_key = "wpcapi_rate_min_{$endpoint_id}_{$client_ip}";
+            $minute_count = (int)get_transient($transient_key);
+
+            if ($minute_count >= $per_minute) {
+                return [
+                    'allowed' => false,
+                    'retry_after' => 60
+                ];
+            }
+
+            set_transient($transient_key, $minute_count + 1, 60);
+        }
+
+        // Check per-hour limit
+        if ($per_hour > 0) {
+            $transient_key = "wpcapi_rate_hour_{$endpoint_id}_{$client_ip}";
+            $hour_count = (int)get_transient($transient_key);
+
+            if ($hour_count >= $per_hour) {
+                return [
+                    'allowed' => false,
+                    'retry_after' => 3600
+                ];
+            }
+
+            set_transient($transient_key, $hour_count + 1, 3600);
+        }
+
+        return ['allowed' => true];
+    }
+
+    /**
+     * Get cached response if exists
+     *
+     * @param WP_REST_Request $request
+     * @param array $endpoint
+     * @return array|null
+     */
+    private static function get_cached_response(WP_REST_Request $request, array $endpoint): ?array
+    {
+        $cache_key = self::generate_cache_key($request, $endpoint);
+        $cached = get_transient($cache_key);
+
+        return $cached !== false ? $cached : null;
+    }
+
+    /**
+     * Cache a response
+     *
+     * @param WP_REST_Request $request
+     * @param array $endpoint
+     * @param array $response_data
+     * @return void
+     */
+    private static function cache_response(WP_REST_Request $request, array $endpoint, array $response_data): void
+    {
+        $cache_key = self::generate_cache_key($request, $endpoint);
+        $ttl = (int)($endpoint['cache_ttl'] ?? 0);
+
+        if ($ttl > 0) {
+            set_transient($cache_key, $response_data, $ttl);
+        }
+    }
+
+    /**
+     * Generate cache key for request
+     *
+     * @param WP_REST_Request $request
+     * @param array $endpoint
+     * @return string
+     */
+    private static function generate_cache_key(WP_REST_Request $request, array $endpoint): string
+    {
+        $endpoint_id = $endpoint['id'] ?? 0;
+        $method = $request->get_method();
+        $params = $request->get_params();
+        $body = $request->get_body();
+
+        // Create unique hash from request components
+        $components = [
+            'endpoint_id' => $endpoint_id,
+            'method' => $method,
+            'params' => $params,
+            'body' => $body
+        ];
+
+        $hash = md5(serialize($components));
+        return "wpcapi_cache_{$endpoint_id}_{$hash}";
+    }
+
+    /**
+     * Dispatch request to async queue (Action Scheduler)
+     *
+     * @param WP_REST_Request $request
+     * @param array $endpoint
+     * @param string $handler_type
+     * @param array $handler_config
+     * @return WP_REST_Response
+     */
+    private static function dispatch_to_queue(
+        WP_REST_Request $request,
+        array $endpoint,
+        string $handler_type,
+        array $handler_config
+    ): WP_REST_Response {
+        // Check if Action Scheduler is available
+        if (!function_exists('as_enqueue_async_action')) {
+            return new WP_REST_Response([
+                'message' => 'Async queue not available. Please ensure Action Scheduler is loaded.'
+            ], 500);
+        }
+
+        // Prepare job data
+        $job_data = [
+            'endpoint_id' => $endpoint['id'] ?? 0,
+            'endpoint_slug' => $endpoint['slug'] ?? '',
+            'handler_type' => $handler_type,
+            'handler_config' => $handler_config,
+            'request_method' => $request->get_method(),
+            'request_params' => $request->get_params(),
+            'request_body' => $request->get_body(),
+            'request_headers' => $request->get_headers(),
+            'client_ip' => self::get_client_ip(),
+            'queued_at' => current_time('mysql')
+        ];
+
+        // Enqueue async action
+        $job_id = as_enqueue_async_action(
+            'wp_custom_api_process_async_endpoint',
+            [$job_data],
+            'wp_custom_api_async'
+        );
+
+        if ($job_id) {
+            return new WP_REST_Response([
+                'message' => 'Request queued for processing',
+                'job_id' => $job_id,
+                'status' => 'queued'
+            ], 202);
+        } else {
+            return new WP_REST_Response([
+                'message' => 'Failed to queue request'
+            ], 500);
+        }
+    }
+
+    /**
+     * Process async endpoint (called by Action Scheduler)
+     *
+     * @param array $job_data Job data from queue
+     * @return void
+     */
+    public static function process_async_endpoint(array $job_data): void
+    {
+        $endpoint_id = $job_data['endpoint_id'] ?? 0;
+
+        if ($endpoint_id <= 0) {
+            Error_Generator::generate('Async Queue Error', 'Invalid endpoint ID in queued job');
+            return;
+        }
+
+        // Get endpoint configuration
+        $result = self::get_endpoint($endpoint_id);
+        if (!$result->ok) {
+            Error_Generator::generate('Async Queue Error', "Endpoint not found: {$endpoint_id}");
+            return;
+        }
+
+        $endpoint = is_array($result->data) ? $result->data[0] : $result->data;
+        $handler_type = $job_data['handler_type'] ?? self::HANDLER_WEBHOOK;
+        $handler_config = $job_data['handler_config'] ?? [];
+
+        // Reconstruct a mock WP_REST_Request for processing
+        $mock_request = new WP_REST_Request($job_data['request_method'] ?? 'POST');
+        $mock_request->set_body($job_data['request_body'] ?? '');
+
+        if (!empty($job_data['request_params'])) {
+            foreach ($job_data['request_params'] as $key => $value) {
+                $mock_request->set_param($key, $value);
+            }
+        }
+
+        try {
+            // Process the handler
+            $response = match ($handler_type) {
+                self::HANDLER_WEBHOOK => self::handle_webhook($mock_request, $endpoint, $handler_config),
+                self::HANDLER_ACTION => self::handle_action($mock_request, $endpoint, $handler_config),
+                self::HANDLER_SCRIPT => self::handle_script($mock_request, $endpoint, $handler_config),
+                self::HANDLER_FORWARD => self::handle_forward($mock_request, $endpoint, $handler_config),
+                self::HANDLER_ETL => self::handle_etl($mock_request, $endpoint, $handler_config),
+                default => null,
+            };
+
+            // Log success
+            do_action('wp_custom_api_async_endpoint_processed', $endpoint_id, $job_data, $response);
+        } catch (\Exception $e) {
+            Error_Generator::generate('Async Endpoint Processing Error', $e->getMessage());
+            do_action('wp_custom_api_async_endpoint_failed', $endpoint_id, $job_data, $e);
+        }
     }
 
     /**
